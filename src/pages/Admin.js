@@ -121,7 +121,7 @@ const Admin = () => {
           ))}
         </div>
 
-        <div className="mt-6 sm:mt-8 sm:shadow-lg sm:bg-background dark:bg-dark-background p-0 sm:p-0 sm:rounded-md overflow-hidden overflow-y-auto max-h-[60vh] scrollbar-hidden">
+        <div className="mt-6 sm:mt-8 r-sm:shadow-lg r-sm:bg-background dark:bg-dark-background p-0 sm:p-0 sm:rounded-md overflow-hidden overflow-y-auto max-h-[60vh] scrollbar-hidden">
           {!activeTab && (
             <p className="text-text dark:text-dark-text text-md font-medium sm:text-text">
               Select a tab to view details

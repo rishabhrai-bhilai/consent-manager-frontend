@@ -8,11 +8,11 @@ module.exports = {
     extend: {
       colors: {
         // Light Theme Colors
-        primary: '#333333',       // Violet shade for buttons, links, accents
+        primary: '#8d55fe',       // Violet shade for buttons, links, accents
         secondary: '#EFF8FF',     // Light violet for card backgrounds, highlights light violet->  #EFF8FF
         background: '#F7FAFC',    // Main background color
         text: '#333333',          // Primary text color (dark gray)
-        accent: '#333333',        // Darker violet for hover states, borders
+        accent: '#8d55fe',        // Darker violet for hover states, borders
         outlines:'#E2E8F0',
         // Dark Theme Colors
         'dark-primary': '#7F9CF5',    // Lighter violet for contrast in dark mode

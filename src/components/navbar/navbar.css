@@ -1,11 +1,11 @@
 :root {
     --white-light: #fff;
-    /* --blue-dark: #8d55fe; */
-    /* --grey-dark: #8d55fe; */
+    --blue-dark: #8d55fe;
+    --grey-dark: #8d55fe;
     --tran-02: all 0.2s ease;
     --tran-03: all 0.3s ease;
     --tran-05: all 0.5s ease;
-    --blue-dark: #333333;
+    /* --blue-dark: #333333; */
     --grey-dark: #333333;
   }
   
@@ -112,7 +112,7 @@
   }
   
   .sidebar li a:hover {
-    background: var(--grey-dark);
+    background: var(--blue-dark);
   }
   
   .sidebar li a:hover .icon,
