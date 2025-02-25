@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  @font-face {
+    font-family: 'Roboto';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,400;0,600;1,400;1,600&display=swap') format('woff2');
+  }
+}
+
+/* Hide scrollbars */
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hidden {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+/* Custom scrollbar styles */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 3px; /* Thin width */
+  height: 3px; /* For horizontal scrollbar */
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #F7FAFC; /* background - light track */
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #D1D5DB; /* Very light gray (Tailwind gray-300) */
+  border-radius: 9999px; /* Fully rounded for cylindrical effect */
+  min-height: 40px; /* Increased to 40px for a longer, bar-like thumb */
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #9CA3AF; /* Slightly darker gray (Tailwind gray-400) */
+}
+.dark .custom-scrollbar::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+.dark .custom-scrollbar::-webkit-scrollbar-track {
+  background: #01081f; /* dark-background - dark track */
+}
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #4B5563; /* Very light grayish (Tailwind gray-600) */
+  border-radius: 9999px; /* Fully rounded for cylindrical effect */
+  min-height: 40px; /* Increased to 40px for a longer, bar-like thumb */
+}
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #6B7280; /* Slightly darker gray (Tailwind gray-500) */
+}
+.custom-scrollbar {
+  -ms-overflow-style: auto; /* IE and Edge */
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: #D1D5DB #F7FAFC; /* Firefox: thumb track */
+}
+.dark .custom-scrollbar {
+  scrollbar-color: #4B5563 #01081f; /* Firefox: thumb track */
+}
+
+/* Slide-up animation for mobile filter drawer */
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
