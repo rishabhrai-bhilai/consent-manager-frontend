@@ -3,6 +3,7 @@ import axios from "./../api/axios";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { useAuth } from "../context/AuthProvider";
+import { getPrivateKey, importRSAPublicKey, wrapAESKey, unwrapAESKey, base64ToArrayBuffer } from "../utils/cryptoUtils";
 
 const NotificationPage = () => {
   const [consentList, setConsentList] = useState([]);
@@ -12,6 +13,7 @@ const NotificationPage = () => {
   const [validityDate, setValidityDate] = useState("");
   const { auth } = useAuth();
   const userId = auth?.userId;
+  const username = auth?.user;
 
   useEffect(() => {
     const fetchConsentList = async () => {
@@ -19,17 +21,14 @@ const NotificationPage = () => {
         toast.error("User ID not found. Please log in.");
         return;
       }
-
       try {
-        const response = await axios.get(`/individual/${userId}/getConsentListByUserId`);
-        console.log("Pending consents received:", response.data);
+        const response = await axios.get(`/provider/${userId}/getConsentList`);
         setConsentList(response.data);
       } catch (error) {
         console.error("Error fetching consent list:", error);
         toast.error("Failed to load pending consent requests.");
       }
     };
-
     fetchConsentList();
   }, [userId]);
 
@@ -39,15 +38,15 @@ const NotificationPage = () => {
       setIsPopupOpen(true);
     } else {
       try {
-        const response = await axios.post("/individual/giveConsent", {
+        const response = await axios.post("/provider/giveConsent", {
           consent_id: consentId,
           consent: action,
         });
         toast.success(response.data.message);
         refreshConsentList();
       } catch (error) {
-        console.error(`Error ${action === "no" ? "rejecting" : "processing"} consent:`, error);
-        toast.error(`Failed to ${action === "no" ? "reject" : "process"} consent.`);
+        console.error(`Error ${action === "no" ? "rejecting" : "revoking"} consent:`, error);
+        toast.error(`Failed to ${action === "no" ? "reject" : "revoke"} consent.`);
       }
     }
   };
@@ -59,27 +58,57 @@ const NotificationPage = () => {
     }
 
     try {
-      const response = await axios.post("/individual/giveConsent", {
+      // Step 1: Get provider's private key
+      const privateKeyPem = await getPrivateKey(username);
+      if (!privateKeyPem) throw new Error("Provider private key not found");
+
+      // Step 2: Initial request to get seekerPublicKey and originalEncryptedAESKey
+      const initialResponse = await axios.post("/provider/giveConsent", {
         consent_id: selectedConsentId,
         consent: "yes",
         count: accessCount,
         validity: validityDate,
       });
 
-      toast.success(response.data.message);
+      const { seekerPublicKey, originalEncryptedAESKey, iv } = initialResponse.data.consentRequest;
+
+      // Step 3: Decrypt original AES key with provider's private key
+      const rsaPrivateKey = await crypto.subtle.importKey(
+        "pkcs8",
+        base64ToArrayBuffer(privateKeyPem.replace("-----BEGIN PRIVATE KEY-----\n", "").replace("\n-----END PRIVATE KEY-----", "").trim()),
+        { name: "RSA-OAEP", hash: "SHA-256" },
+        false,
+        ["decrypt"]
+      );
+      const aesKey = await unwrapAESKey(originalEncryptedAESKey, rsaPrivateKey);
+
+      // Step 4: Re-encrypt AES key with seeker's public key
+      const seekerRsaPublicKey = await importRSAPublicKey(seekerPublicKey);
+      const encryptedAESKeyForSeeker = await wrapAESKey(aesKey, seekerRsaPublicKey);
+
+      // Step 5: Final request to save encryptedAESKeyForSeeker
+      const finalResponse = await axios.post("/provider/giveConsent", {
+        consent_id: selectedConsentId,
+        consent: "yes",
+        count: accessCount,
+        validity: validityDate,
+        encryptedAESKeyForSeeker,
+      });
+
+      toast.success(finalResponse.data.message);
       setIsPopupOpen(false);
       setAccessCount("");
       setValidityDate("");
       refreshConsentList();
     } catch (error) {
       console.error("Error giving consent:", error);
-      toast.error("Failed to give consent.");
+      toast.error("Failed to give consent: " + error.message);
     }
   };
 
   const refreshConsentList = async () => {
     try {
-      const response = await axios.get(`/individual/${userId}/getConsentListByUserId`);
+      const response = await axios.get(`/provider/${userId}/getConsentList`);
       setConsentList(response.data);
     } catch (error) {
       console.error("Error refreshing consent list:", error);
@@ -105,7 +134,6 @@ const NotificationPage = () => {
                 key={consent.consent_id}
                 className="bg-white rounded-lg shadow-sm border border-outlines overflow-hidden"
               >
-                {/* Mobile Layout */}
                 <div className="sm:hidden p-4">
                   <div className="flex items-center gap-3 mb-3">
                     <div className="p-2 bg-secondary rounded-full">
@@ -142,7 +170,6 @@ const NotificationPage = () => {
                   </div>
                 </div>
 
-                {/* Desktop Layout */}
                 <div className="hidden sm:flex sm:items-start sm:p-6">
                   <div className="flex items-start space-x-4 flex-1">
                     <div className="p-3 bg-secondary rounded-full">

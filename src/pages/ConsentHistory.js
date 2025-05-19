@@ -38,7 +38,8 @@ const ConsentHistory = () => {
       try {
         setLoading(true);
         console.log("Fetching consent history for userId:", userId);
-        const response = await axios.get(`/individual/${userId}/getConsentHistoryByUserId`);
+        // Corrected endpoint: /provider/:providerId/getConsentHistory
+        const response = await axios.get(`/provider/${userId}/getConsentHistory`);
         console.log("Consent history response:", response.data);
 
         if (response.data.success) {

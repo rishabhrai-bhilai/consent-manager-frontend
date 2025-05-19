@@ -46,13 +46,13 @@ const RequestList = ({ requests, onApprove, onReject }) => {
             {/* Request Summary */}
             <div className="flex-grow space-y-1 sm:ml-4">
               <h3 className="text-base font-semibold text-text dark:text-dark-text leading-tight">
-                {request.first_name} {request.last_name}
+                {request.first_name ? `${request.first_name} ${request.last_name || ''}` : request.name}
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400">
                 Email: {request.email}
               </p>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Mobile: {request.mobile_no}
+                Mobile: {request.mobile_no || request.contact_no}
               </p>
             </div>
 
@@ -115,11 +115,11 @@ const PendingRequest = ({ type }) => {
       try {
         setLoading(true);
         const endpoint = type === 'individual'
-          ? '/admin/getIndividualBackLog'
-          : '/admin/getRequestorBackLog';
+          ? '/admin/getProviderBackLog'
+          : '/admin/getSeekerBackLog';
 
         const response = await axios.get(endpoint, { signal: abortController.signal });
-        setRequests(response.data.data);
+        setRequests(response.data.data || []);
         console.log(response.data.data);
       } catch (error) {
         if (!abortController.signal.aborted) {
@@ -140,17 +140,15 @@ const PendingRequest = ({ type }) => {
 
   const handleApprove = async (id) => {
     try {
-      const endpoint = type === 'individual' 
-        ? '/admin/approval/individual' 
-        : '/admin/approval/requestor';
-  
+      const endpoint = type === 'individual' ? '/admin/approval/provider' : '/admin/approval/seeker';
+      const paramName = type === 'individual' ? 'providerId' : 'seekerId';
       const response = await axios.post(endpoint, {
-        userId: id,
-        action: 'approve'
+        [paramName]: id, // Use dynamic key to match backend expectation
+        action: 'approve',
       });
-  
+
       if (response.status === 200) {
-        setRequests(requests.filter(request => request._id !== id));
+        setRequests(requests.filter((request) => request._id !== id));
         toast.success('Request approved successfully');
       } else {
         toast.error('Approval failed');
@@ -160,20 +158,18 @@ const PendingRequest = ({ type }) => {
       toast.error('Error approving request');
     }
   };
-  
+
   const handleReject = async (id) => {
     try {
-      const endpoint = type === 'individual' 
-        ? '/admin/approval/individual' 
-        : '/admin/approval/requestor';
-  
+      const endpoint = type === 'individual' ? '/admin/approval/provider' : '/admin/approval/seeker';
+      const paramName = type === 'individual' ? 'providerId' : 'seekerId';
       const response = await axios.post(endpoint, {
-        userId: id,
-        action: 'reject'
+        [paramName]: id, // Use dynamic key to match backend expectation
+        action: 'reject',
       });
-  
+
       if (response.status === 200) {
-        setRequests(requests.filter(request => request._id !== id));
+        setRequests(requests.filter((request) => request._id !== id));
         toast.success('Request rejected successfully');
       } else {
         toast.error('Rejection failed');

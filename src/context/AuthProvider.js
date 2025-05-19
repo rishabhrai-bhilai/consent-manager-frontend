@@ -1,21 +1,34 @@
-// AuthProvider.js
-import { createContext, useState ,useContext} from "react";
+import { createContext, useState, useContext, useEffect } from "react";
 
 const AuthContext = createContext(null);
 
-// Export the useAuth hook as a named export
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }) => {
-  const [auth, setAuth] = useState(null);
+  const [auth, setAuth] = useState(() => {
+    const storedAuth = localStorage.getItem("auth");
+    return storedAuth ? JSON.parse(storedAuth) : null;
+  });
 
   const login = (user, role, accessToken, userId) => {
-    setAuth({ user, role, accessToken, userId });
+    const backendRole = role === "individual" ? "provider" : role === "requestor" ? "seeker" : role;
+    const authData = { user, role: backendRole, accessToken, userId };
+    setAuth(authData);
+    localStorage.setItem("auth", JSON.stringify(authData));
   };
 
   const logout = () => {
     setAuth(null);
+    localStorage.removeItem("auth");
   };
+
+  useEffect(() => {
+    if (auth) {
+      localStorage.setItem("auth", JSON.stringify(auth));
+    } else {
+      localStorage.removeItem("auth");
+    }
+  }, [auth]);
 
   return (
     <AuthContext.Provider value={{ auth, login, logout }}>

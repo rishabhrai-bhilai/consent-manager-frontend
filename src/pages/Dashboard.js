@@ -3,12 +3,22 @@ import axios from "./../api/axios";
 import { useAuth } from "../context/AuthProvider";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+import {
+  getPrivateKey,
+  encryptData,
+  decryptItem,
+  generateAESKey,
+  importRSAPublicKey,
+  wrapAESKey,
+} from "../utils/cryptoUtils";
 
 const Dashboard = () => {
   const [formData, setFormData] = useState({
-    key: "",
-    value: "",
+    item_name: "",
+    encryptedData: "",
     item_id: null,
+    encryptedAESKey: null,
+    iv: null,
   });
   const [isOpen, setIsOpen] = useState(false);
   const [keyValuePairs, setKeyValuePairs] = useState([]);
@@ -17,74 +27,152 @@ const Dashboard = () => {
 
   const { auth } = useAuth();
   const userId = auth?.userId;
+  const username = auth?.user;
 
   const fetchUserDataAndItems = async () => {
     setIsLoading(true);
     try {
-      const userResponse = await axios.get(`/individual/${userId}/getUserData`);
+      const userResponse = await axios.get(`/provider/${userId}/getUserData`);
+      console.log("User Data Response:", userResponse.data);
       setUserData(userResponse.data);
 
-      const itemsResponse = await axios.get(`/individual/${userId}/getItems`);
-      console.log("Items Response:", itemsResponse.data);
-      const filteredData = itemsResponse.data.map((item) => ({
-        item_id: item.item_id,
-        item_name: item.item_name,
-        item_value: item.item_value,
-      }));
-      setKeyValuePairs(filteredData);
+      const itemsResponse = await axios.get(`/provider/${userId}/getItems`);
+      console.log("Text Items Response:", itemsResponse.data);
+      const privateKeyPem = await getPrivateKey(username);
+      if (!privateKeyPem) throw new Error("Private key not found in IndexedDB.");
+
+      const decryptedItems = await Promise.all(
+        itemsResponse.data.map(async (item) => {
+          const decryptedValue = await decryptItem(item.encryptedData, item.encryptedAESKey, item.iv, privateKeyPem);
+          return {
+            item_id: item.itemId,
+            item_name: item.item_name,
+            item_value: decryptedValue,
+            encryptedAESKey: item.encryptedAESKey,
+            iv: item.iv,
+          };
+        })
+      );
+
+      setKeyValuePairs(decryptedItems);
     } catch (error) {
-      toast.error("Failed to fetch data. Please try again.");
+      console.error("Error fetching data:", error);
+      toast.error(error.message || "Failed to fetch data.");
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchUserDataAndItems();
-  }, []);
+    if (userId && username) {
+      fetchUserDataAndItems();
+    }
+  }, [userId, username]);
 
   const handleInputChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleCancel = () => {
-    setFormData({ key: "", value: "", item_id: null });
+    setFormData({ item_name: "", encryptedData: "", item_id: null, encryptedAESKey: null, iv: null });
     setIsOpen(false);
+  };
+
+  const encryptDataWithWebCrypto = async (data, existingEncryptedAESKey = null, existingIV = null) => {
+    try {
+      let aesKey, iv, encryptedAESKey;
+
+      if (existingEncryptedAESKey && existingIV) {
+        const privateKeyPem = await getPrivateKey(username);
+        if (!privateKeyPem) throw new Error("Private key not found.");
+        const rsaPrivateKey = await crypto.subtle.importKey(
+          "pkcs8",
+          base64ToArrayBuffer(privateKeyPem.replace("-----BEGIN PRIVATE KEY-----\n", "").replace("\n-----END PRIVATE KEY-----", "").trim()),
+          { name: "RSA-OAEP", hash: "SHA-256" },
+          false,
+          ["decrypt"]
+        );
+        const encryptedKeyBuffer = base64ToArrayBuffer(existingEncryptedAESKey);
+        const decryptedKey = await crypto.subtle.decrypt(
+          { name: "RSA-OAEP" },
+          rsaPrivateKey,
+          encryptedKeyBuffer
+        );
+        aesKey = await crypto.subtle.importKey(
+          "raw",
+          decryptedKey,
+          { name: "AES-GCM", length: 256 },
+          true,
+          ["encrypt", "decrypt"]
+        );
+        iv = existingIV;
+        encryptedAESKey = existingEncryptedAESKey;
+      } else {
+        aesKey = await generateAESKey();
+        const publicKeyPem = userData?.publicKey;
+        if (!publicKeyPem) throw new Error("Public key not found in user data.");
+        const rsaPublicKey = await importRSAPublicKey(publicKeyPem);
+        encryptedAESKey = await wrapAESKey(aesKey, rsaPublicKey);
+        iv = null;
+      }
+
+      const { encryptedData, iv: newIV } = await encryptData(data, aesKey, iv);
+      iv = iv || newIV;
+
+      return { encryptedData, encryptedAESKey, iv };
+    } catch (error) {
+      console.error("Encryption Error:", error);
+      throw error;
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
+      const { encryptedData, encryptedAESKey, iv } = await encryptDataWithWebCrypto(
+        formData.encryptedData,
+        formData.encryptedAESKey,
+        formData.iv
+      );
       let response;
+
       if (formData.item_id) {
-        response = await axios.post(`/individual/${userId}/editItems`, {
+        response = await axios.put(`/provider/${userId}/editItem`, {
           itemId: formData.item_id,
-          item_name: formData.key,
-          item_value: formData.value,
+          item_name: formData.item_name,
+          item_type: "text",
+          encryptedData,
+          encryptedAESKey,
+          iv,
         });
         if (response.status === 200) {
-          toast.success(`Item "${formData.key}" updated successfully!`);
+          toast.success(`Item "${formData.item_name}" updated successfully!`);
           setKeyValuePairs(
             keyValuePairs.map((it) =>
               it.item_id === formData.item_id
-                ? { ...it, item_name: formData.key, item_value: formData.value }
+                ? { ...it, item_name: formData.item_name, item_value: formData.encryptedData }
                 : it
             )
           );
         }
       } else {
-        response = await axios.post(`/individual/${userId}/addItems`, {
-          item_name: formData.key,
-          item_value: formData.value,
+        response = await axios.post(`/provider/${userId}/addItems`, {
+          item_name: formData.item_name,
+          item_type: "text",
+          encryptedData,
+          encryptedAESKey,
+          iv,
         });
         if (response.status === 201) {
-          toast.success(`Item "${formData.key}" added successfully!`);
+          toast.success(`Item "${formData.item_name}" added successfully!`);
           setKeyValuePairs([
             ...keyValuePairs,
             {
-              item_id: response.data.item_id,
-              item_name: formData.key,
-              item_value: formData.value,
+              item_id: response.data.itemId,
+              item_name: formData.item_name,
+              item_value: formData.encryptedData,
+              encryptedAESKey,
+              iv,
             },
           ]);
         }
@@ -92,22 +180,18 @@ const Dashboard = () => {
       handleCancel();
     } catch (error) {
       console.error("Error handling item:", error);
-      toast.error("An error occurred. Please try again.");
+      toast.error(`An error occurred: ${error.message}. Please try again.`);
     }
   };
 
   const handleDelete = async (itemId, itemName) => {
     try {
-      const response = await axios.post(`/individual/${userId}/deleteItems`, {
-        itemId: itemId,
+      const response = await axios.delete(`/provider/${userId}/deleteItem`, {
+        data: { itemId },
       });
       if (response.status === 200) {
         toast.success(`Item "${itemName}" deleted successfully!`);
-        setKeyValuePairs(
-          keyValuePairs.filter((item) => item.item_id !== itemId)
-        );
-      } else {
-        toast.error("Failed to delete item. Please try again.");
+        setKeyValuePairs(keyValuePairs.filter((item) => item.item_id !== itemId));
       }
     } catch (error) {
       console.error("Error deleting item:", error);
@@ -117,11 +201,22 @@ const Dashboard = () => {
 
   const handleEdit = (item) => {
     setFormData({
-      key: item.item_name,
-      value: item.item_value,
+      item_name: item.item_name,
+      encryptedData: item.item_value,
       item_id: item.item_id,
+      encryptedAESKey: item.encryptedAESKey,
+      iv: item.iv,
     });
     setIsOpen(true);
+  };
+
+  const base64ToArrayBuffer = (base64) => {
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
   };
 
   return (
@@ -133,7 +228,6 @@ const Dashboard = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto scrollbar-hidden px-4 pb-8">
-        {/* User Card */}
         <div className="title mt-4 flex rounded-md bg-background dark:bg-dark-background shadow-md dark:shadow-lg">
           <div className="relative flex w-full flex-col sm:flex-row items-center overflow-hidden rounded-md bg-background dark:bg-dark-background p-6 shadow-lg sm:items-start">
             <div className="absolute -right-4 -top-4 h-20 w-20 rounded-full bg-primary dark:bg-dark-primary opacity-20 sm:h-24 sm:w-24"></div>
@@ -182,18 +276,17 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Key-Value Pairs Card */}
-        <div className="flex card sshadow-xl dark:shadow-lg border-0 flex-wrap mt-2 gap-2 justify-between">
-          <div className="relative rounded-md mt-4 w-full space-y-0 overflow-hidden bg-secondary dark:bg-dark-background sshadow-md dark:shadow-lg">
+        <div className="flex card shadow-xl dark:shadow-lg border-0 flex-wrap mt-2 gap-2 justify-between">
+          <div className="relative rounded-md mt-4 w-full space-y-0 overflow-hidden bg-secondary dark:bg-dark-background shadow-md dark:shadow-lg">
             <div className="w-full flex justify-between bg-secondary dark:bg-dark-background p-4 border-b border-secondary dark:border-dark-secondary">
               <h3 className="text-base sm:text-lg md:text-xl font-semibold text-text dark:text-dark-text">
-                Vault Data
+                Vault Data (Text Items)
               </h3>
               <span className="text-md sm:text-md md:text-base text-primary dark:text-gray-400">
                 {keyValuePairs.length} Items
               </span>
             </div>
-            <div className="flex flex-wrap w-full mtxx-4 gap-4 p4 bg-secondary dark:bg-dark-background rounded-md">
+            <div className="flex flex-wrap w-full mt-4 gap-4 p-4 bg-secondary dark:bg-dark-background rounded-md">
               {keyValuePairs.map(({ item_id, item_name, item_value }) => (
                 <div
                   key={item_id}
@@ -214,7 +307,15 @@ const Dashboard = () => {
                     ></i>
                     <i
                       className="bx bx-edit text-lg sm:text-lg md:text-xl text-primary dark:text-dark-primary cursor-pointer hover:text-accent dark:hover:text-dark-accent"
-                      onClick={() => handleEdit({ item_id, item_name, item_value })}
+                      onClick={() =>
+                        handleEdit({
+                          item_id,
+                          item_name,
+                          item_value,
+                          encryptedAESKey: keyValuePairs.find((i) => i.item_id === item_id).encryptedAESKey,
+                          iv: keyValuePairs.find((i) => i.item_id === item_id).iv,
+                        })
+                      }
                     ></i>
                   </div>
                 </div>
@@ -224,7 +325,6 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Add/Edit Item Modal */}
       {isOpen && (
         <div className="fixed inset-0 flex items-center justify-center bg-gray-800 dark:bg-gray-900 bg-opacity-50 dark:bg-opacity-50 backdrop-blur-lg z-50">
           <div className="w-11/12 max-w-sm sm:max-w-lg p-6 sm:p-10 bg-background dark:bg-dark-background rounded-lg shadow-lg dark:shadow-xl relative">
@@ -236,15 +336,15 @@ const Dashboard = () => {
                 <input
                   type="text"
                   placeholder="Key"
-                  value={formData.key}
-                  onChange={(e) => handleInputChange("key", e.target.value)}
+                  value={formData.item_name}
+                  onChange={(e) => handleInputChange("item_name", e.target.value)}
                   className="w-full text-xs sm:text-sm md:text-base h-[50px] px-4 text-text dark:text-dark-text bg-background dark:bg-dark-background rounded-[8px] border border-gray-400 dark:border-dark-secondary focus:border-primary dark:focus:border-dark-primary focus:outline-none"
                 />
                 <input
                   type="text"
                   placeholder="Value"
-                  value={formData.value}
-                  onChange={(e) => handleInputChange("value", e.target.value)}
+                  value={formData.encryptedData}
+                  onChange={(e) => handleInputChange("encryptedData", e.target.value)}
                   className="w-full text-xs sm:text-sm md:text-base h-[50px] px-4 text-text dark:text-dark-text bg-background dark:bg-dark-background rounded-[8px] border border-gray-400 dark:border-dark-secondary focus:border-primary dark:focus:border-dark-primary focus:outline-none"
                 />
               </div>
@@ -274,11 +374,10 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Add Item Button */}
       <div
         className="fixed bottom-4 right-4 h-12 w-12 rounded-full bg-primary text-white shadow-lg dark:shadow-xl hover:bg-accent dark:hover:bg-dark-accent transition"
         onClick={() => {
-          setFormData({ key: "", value: "", item_id: null });
+          setFormData({ item_name: "", encryptedData: "", item_id: null, encryptedAESKey: null, iv: null });
           setIsOpen(true);
         }}
       >

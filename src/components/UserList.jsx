@@ -3,26 +3,19 @@ import axios from "./../api/axios";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { useAuth } from "../context/AuthProvider";
-
-const formatDate = (isoDate) => {
-  const date = new Date(isoDate);
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const year = date.getFullYear();
-  return `${day}-${month}-${year}`;
-};
+import { getPrivateKey, decryptItem, decryptFileItem, arrayBufferToBase64 } from "../utils/cryptoUtils";
 
 function UserList() {
   const [userItems, setUserItems] = useState([]);
   const [userDetails, setUserDetails] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [searchUsername, setSearchUsername] = useState("");
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [viewFileUrl, setViewFileUrl] = useState(null);
+  const [viewItemType, setViewItemType] = useState(null);
   const { auth } = useAuth();
   const seekerId = auth?.userId;
-
-  useEffect(() => {
-    console.log("UserList mounted or updated. searchUsername:", searchUsername);
-  }, [searchUsername]);
+  const username = auth?.user;
 
   const handleSearch = async () => {
     if (!searchUsername.trim()) {
@@ -30,62 +23,37 @@ function UserList() {
       return;
     }
 
-    console.log("handleSearch triggered with username:", searchUsername);
     setDetailsLoading(true);
     try {
-      const response = await axios.post(`/requestor/check-consent`, {
-        providerName: searchUsername,
-        seekerName: auth?.user,
+      const response = await axios.get(`/seeker/providerItems`, {
+        params: { username: searchUsername },
       });
       console.log("Search response:", response.data);
-
-      if (!response.data || !response.data.publicData) {
-        throw new Error("Invalid response structure from API");
-      }
-
       setUserDetails({
-        first_name: response.data.publicData.firstName,
-        middle_name: response.data.publicData.middleName,
-        last_name: response.data.publicData.lastName,
-        email: response.data.publicData.email,
-        mobile_no: response.data.publicData.mobileNo,
-        age: response.data.publicData.age,
-        image: response.data.publicData.image || "https://via.placeholder.com/150",
+        first_name: response.data.provider.firstname,
+        last_name: response.data.provider.lastname,
+        email: response.data.provider.email,
+        mobile_no: response.data.provider.mobile,
+        image: "https://plus.unsplash.com/premium_photo-1689568126014-06fea9d5d341?q=80&w=2070&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
       });
 
-      if (!response.data.items || !Array.isArray(response.data.items)) {
-        console.warn("Items missing or not an array:", response.data.items);
-        setUserItems([]);
-      } else {
-        console.log("Mapping items:", response.data.items);
-        const formattedItems = response.data.items.map((item) => {
-          console.log("Processing item:", item);
-          return {
-            _id: item.itemId,
-            item_name: item.itemName,
-            item_value: "XXXX",
-            status: item.status || null,
-            access_count: item.accessCount || null,
-            validity_period: item.validityPeriod || null,
-            isViewed: false,
-          };
-        });
-        console.log("Formatted items:", formattedItems);
-        setUserItems(formattedItems);
-      }
-
-      toast.success(`User details fetched successfully!`);
+      const formattedItems = response.data.items.map((item) => ({
+        _id: item.itemId,
+        item_name: item.item_name,
+        item_type: item.item_type,
+        item_value: item.item_type === "text" ? "XXXX" : null,
+        item_url: null,
+        status: null,
+        access_count: null,
+        validity_period: null,
+        isViewed: false,
+      }));
+      console.log("Active items loaded:", formattedItems.length);
+      setUserItems(formattedItems);
+      toast.success(`User details and ${formattedItems.length} active items fetched successfully!`);
     } catch (error) {
       console.error("Error fetching user data:", error);
-      if (error.response) {
-        if (error.response.status === 404) {
-          toast.error(error.response.data.message || "No user found.");
-        } else {
-          toast.error("An error occurred while fetching user details.");
-        }
-      } else {
-        toast.error(error.message || "An error occurred.");
-      }
+      toast.error(error.response?.data?.message || "An error occurred.");
       setUserDetails(null);
       setUserItems([]);
     } finally {
@@ -93,106 +61,134 @@ function UserList() {
     }
   };
 
+  const decryptFileUrl = async (encryptedUrl, encryptedAESKey, iv, itemId) => {
+    try {
+      if (!encryptedUrl) throw new Error("Encrypted URL is missing");
+      if (encryptedUrl === "https://via.placeholder.com/150") {
+        throw new Error("Cannot decrypt placeholder URL");
+      }
+
+      const privateKeyPem = await getPrivateKey(username);
+      if (!privateKeyPem) throw new Error("Private key not found in IndexedDB");
+
+      // Fetch the encrypted file from the backend using the seeker endpoint
+      const response = await axios.get(`/seeker/${seekerId}/fetchFile?url=${encodeURIComponent(encryptedUrl)}&itemId=${itemId}`, {
+        responseType: "arraybuffer",
+        headers: {
+          Authorization: `Bearer ${auth.accessToken}`,
+        },
+      });
+
+      const encryptedData = response.data;
+      console.log("Encrypted data size:", encryptedData.byteLength);
+
+      const decryptedData = await decryptFileItem(arrayBufferToBase64(encryptedData), encryptedAESKey, iv, privateKeyPem);
+      console.log("Decrypted data size:", decryptedData.byteLength);
+
+      const mimeType = encryptedUrl.includes(".pdf") ? "application/pdf" : "image/jpeg";
+      const blob = new Blob([decryptedData], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      console.log("Decrypted URL created:", url);
+      return url;
+    } catch (error) {
+      console.error("Error in decryptFileUrl:", error.message);
+      toast.error(error.response?.data?.message || `Failed to process file: ${error.message}`);
+      return null;
+    }
+  };
+
   const handleViewItem = async (itemId) => {
     try {
-      console.log("handleViewItem triggered for itemId:", itemId);
-      const response = await axios.post(`/requestor/${seekerId}/accessItem`, {
-        item_id: itemId,
-      });
-      console.log("View item response:", response.data);
+      const response = await axios.post(
+        `/seeker/${seekerId}/accessItem`,
+        { item_id: itemId },
+        { validateStatus: (status) => status >= 200 && status < 500 }
+      );
+      console.log("Access item response:", response.data);
 
-      if (response.status === 200) {
-        const formattedValidity = formatDate(response.data.validity_period);
-        setUserItems((prevState) =>
-          prevState.map((item) =>
-            item._id === itemId
-              ? {
-                  ...item,
-                  item_value: response.data.item_value,
-                  access_count: response.data.access_count,
-                  validity_period: response.data.validity_period,
-                  status: response.data.status,
-                  isViewed: true,
-                }
-              : item
-          )
+      const { consent_status, message, encryptedData, encryptedUrl, encryptedAESKeyForSeeker, iv, access_count, validity_period, item_type } = response.data;
+
+      let decryptedValue = item_type === "text" ? "XXXX" : null;
+      let fileUrl = null;
+
+      if (consent_status === "approved") {
+        const privateKeyPem = await getPrivateKey(username);
+        if (!privateKeyPem) throw new Error("Seeker private key not found");
+
+        if (item_type === "text") {
+          decryptedValue = await decryptItem(encryptedData, encryptedAESKeyForSeeker, iv, privateKeyPem);
+        } else {
+          fileUrl = await decryptFileUrl(encryptedUrl, encryptedAESKeyForSeeker, iv, itemId);
+        }
+      }
+
+      setUserItems((prevState) => {
+        const updatedItems = prevState.map((item) =>
+          item._id === itemId
+            ? {
+                ...item,
+                status: consent_status,
+                item_value: item_type === "text" ? (consent_status === "approved" ? decryptedValue : "XXXX") : null,
+                item_url: consent_status === "approved" && item_type !== "text" ? fileUrl : null,
+                access_count: consent_status === "approved" ? (item_type === "text" ? access_count : access_count - 1) : null, // Reflect post-fetch count for non-text
+                validity_period: consent_status === "approved" ? validity_period : null,
+                isViewed: consent_status !== "pending",
+              }
+            : item
         );
-        console.log("Item updated after view:", { itemId, status: response.data.status });
-        toast.success(
-          `Item ${response.data.item_name} accessed! Remaining accesses: ${response.data.access_count}, Valid till: ${formattedValidity}`
-        );
-      } else if (response.status === 202) {
-        setUserItems((prevState) =>
-          prevState.map((item) =>
-            item._id === itemId
-              ? {
-                  ...item,
-                  status: response.data.status, // Use status from response
-                  isViewed: response.data.status === "rejected" || response.data.status === "revoked" || response.data.status === "pending", // Disable View for rejected/revoked/pending
-                }
-              : item
-          )
-        );
-        console.log("Item updated after 202:", { itemId, status: response.data.status });
-        toast.info(response.data.message || "Access request sent.");
-      } else if (response.status === 403) {
-        setUserItems((prevState) =>
-          prevState.map((item) =>
-            item._id === itemId
-              ? {
-                  ...item,
-                  status: response.data.status,
-                  isViewed: true,
-                }
-              : item
-          )
-        );
-        console.log("Item updated after 403:", { itemId, status: response.data.status });
-        toast.info(response.data.message);
+        console.log("Updated items:", updatedItems);
+        return updatedItems;
+      });
+
+      if (response.status === 200 && consent_status === "approved" && item_type !== "text" && fileUrl) {
+        // Open the file in a modal for viewing
+        setViewFileUrl(fileUrl);
+        setViewItemType(item_type);
+        setIsViewModalOpen(true);
+        toast.success(`${message} Remaining accesses: ${item_type === "text" ? access_count : access_count - 1}, Valid till: ${validity_period}`);
+      } else if (response.status === 200 && item_type === "text") {
+        toast.success(`${message} Remaining accesses: ${access_count}, Valid till: ${validity_period}`);
+      } else if (response.status === 202 || response.status === 403) {
+        toast.info(message);
       } else {
-        console.warn("Unexpected response status:", response.status);
-        toast.warning("Unexpected response. Try again.");
+        toast.warning("Unexpected response status: " + response.status);
       }
     } catch (error) {
       console.error("Error accessing item:", error);
-      toast.error("Failed to access item.");
+      toast.error(error.response?.data?.message || "Failed to access item.");
     }
   };
 
   const handleRequestConsent = async (itemId) => {
     try {
-      console.log("handleRequestConsent triggered for itemId:", itemId);
-      const response = await axios.post(`/requestor/${seekerId}/accessItem`, {
+      const response = await axios.post(`/seeker/${seekerId}/requestAccessAgain`, {
         item_id: itemId,
       });
       console.log("Request consent response:", response.data);
-
-      if (response.status === 202) {
-        setUserItems((prevState) =>
-          prevState.map((item) =>
-            item._id === itemId
-              ? {
-                  ...item,
-                  status: "pending",
-                  isViewed: true,
-                }
-              : item
-          )
-        );
-        console.log("Item updated to pending after request:", { itemId });
-        toast.info("Permission request sent");
-      } else {
-        console.warn("Unexpected response status:", response.status);
-        toast.warning("Unexpected response. Try again.");
-      }
+      setUserItems((prevState) =>
+        prevState.map((item) =>
+          item._id === itemId
+            ? { ...item, status: "pending", isViewed: false }
+            : item
+        )
+      );
+      toast.info(response.data.message);
     } catch (error) {
       console.error("Error requesting consent:", error);
-      toast.error("Failed to request consent.");
+      toast.error(error.response?.data?.message || "Failed to request consent.");
     }
+  };
+
+  const closeViewModal = () => {
+    setIsViewModalOpen(false);
+    if (viewFileUrl) URL.revokeObjectURL(viewFileUrl);
+    setViewFileUrl(null);
+    setViewItemType(null);
   };
 
   return (
     <div className="mt-4 h-[100%] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+      <ToastContainer position="top-right" autoClose={5000} />
       <div className="px-4 py-4 w-2/5 bg-blue-50">
         <div className="flex items-center space-x-2">
           <input
@@ -223,11 +219,10 @@ function UserList() {
             </div>
             <div className="flex-1">
               <h2 className="text-xl font-semibold text-gray-800">
-                {userDetails.first_name} {userDetails.middle_name} {userDetails.last_name}
+                {userDetails.first_name} {userDetails.last_name}
               </h2>
               <p className="text-gray-600">Email: {userDetails.email}</p>
               <p className="text-gray-600">Contact: {userDetails.mobile_no}</p>
-              <p className="text-gray-600">Age: {userDetails.age}</p>
             </div>
           </div>
         </div>
@@ -247,10 +242,11 @@ function UserList() {
                   <span className="font-medium">
                     {item.item_name}:{" "}
                     <span className="font-normal text-gray-600">
-                      {item.item_value}
-                      {item.access_count !== null && (
+                      {item.item_type === "text" ? item.item_value : item.item_url ? "File Available" : "XXXX"}
+                      {(item.access_count !== null || item.validity_period) && (
                         <span className="ml-2 text-sm text-gray-500">
-                          (Remaining accesses: {item.access_count}, Valid till: {formatDate(item.validity_period)})
+                          {item.access_count !== null && `(Remaining accesses: ${item.access_count})`}
+                          {item.validity_period && `, Valid till: ${item.validity_period}`}
                         </span>
                       )}
                     </span>
@@ -258,16 +254,16 @@ function UserList() {
                   <div className="flex space-x-2">
                     <button
                       onClick={() => handleViewItem(item._id)}
-                      disabled={item.isViewed || item.status === "pending"}
+                      disabled={item.status === "pending" || item.isViewed}
                       className={`px-4 py-1 rounded-lg shadow ${
-                        item.isViewed || item.status === "pending"
+                        item.status === "pending" || item.isViewed
                           ? "bg-gray-400 text-gray-700 cursor-not-allowed"
                           : "bg-violet-500 text-white hover:bg-violet-600"
                       }`}
                     >
                       {item.status === "pending" ? "Pending" : "View"}
                     </button>
-                    {item.status && ["rejected", "revoked", "count exhausted", "expired"].includes(item.status) && (
+                    {["rejected", "revoked", "expired", "count exhausted"].includes(item.status) && (
                       <button
                         onClick={() => handleRequestConsent(item._id)}
                         disabled={item.status === "pending"}
@@ -290,7 +286,38 @@ function UserList() {
         )}
       </div>
 
-      <ToastContainer position="top-right" autoClose={5000} />
+      {isViewModalOpen && (
+        <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50">
+          <div className="w-full h-full flex flex-col bg-white rounded-lg shadow-lg overflow-auto">
+            <div className="flex justify-between items-center p-4 border-b">
+              <h2 className="text-lg font-medium">Viewing File</h2>
+              <button
+                onClick={closeViewModal}
+                className="text-gray-500 hover:text-red-500 text-2xl"
+              >
+                ×
+              </button>
+            </div>
+            <div className="flex-1 p-4 flex items-center justify-center">
+              {viewFileUrl && (
+                viewItemType === "pdf" ? (
+                  <iframe
+                    src={viewFileUrl}
+                    className="w-full h-full"
+                    title="PDF Viewer"
+                  />
+                ) : (
+                  <img
+                    src={viewFileUrl}
+                    alt="Viewed File"
+                    className="max-w-full max-h-full object-contain"
+                  />
+                )
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

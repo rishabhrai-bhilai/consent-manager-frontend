@@ -14,7 +14,7 @@ const RequestorDashboard = () => {
   const fetchRequestorData = async () => {
     setIsLoading(true);
     try {
-      const response = await axios.get(`/requestor/${userId}/getRequestorData`);
+      const response = await axios.get(`/seeker/${userId}/getSeekerData`);
       setUserData(response.data);
     } catch (error) {
       toast.error("Failed to fetch data. Please try again.");
@@ -49,7 +49,6 @@ const RequestorDashboard = () => {
                   <div className="h-4 w-24 bg-gray-300 dark:bg-gray-600 rounded"></div>
                   <div className="h-4 w-24 bg-gray-300 dark:bg-gray-600 rounded"></div>
                   <div className="h-4 w-24 bg-gray-300 dark:bg-gray-600 rounded"></div>
-                  <div className="sm:col-span-2 h-4 w-40 bg-gray-300 dark:bg-gray-600 rounded"></div>
                 </div>
               </div>
             </div>
@@ -98,14 +97,6 @@ const RequestorDashboard = () => {
                     <span className="font-semibold">Address</span>
                     <span className="text-gray-500 dark:text-gray-400 line-clamp-2">
                       {userData?.address || "N/A"}
-                    </span>
-                  </div>
-                  <div className="sm:col-span-2 flex flex-col">
-                    <span className="font-semibold">Created At</span>
-                    <span className="text-gray-500 dark:text-gray-400">
-                      {userData?.created_at
-                        ? new Date(userData.created_at).toLocaleDateString()
-                        : "N/A"}
                     </span>
                   </div>
                 </div>

@@ -19,8 +19,8 @@ import RequestorConsentHistory from './pages/RequestorConsentHistory';
 import RequestorDashboard from './pages/RequestorDashboard';
 
 const ROLES = {
-  individual: 'individual',
-  requestor: 'requestor',
+  individual: 'provider',
+  requestor: 'seeker',
   admin: 'admin',
 };
 

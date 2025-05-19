@@ -3,19 +3,20 @@ import "../navbar/navbar.css";
 import useColorMode from "../../hooks/useColorMode";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthProvider";
+import { clearPrivateKey } from "../../utils/cryptoUtils"; // Import clearPrivateKey
 
 const navLinks = {
   admin: [
     { name: "Dashboard", path: "/admin/dashboard", icon: "bx-home-alt" },
     { name: "History", path: "/history", icon: "bx-history" },
   ],
-  individual: [
+  provider: [
     { name: "Dashboard", path: "/individual/dashboard", icon: "bx-home-alt" },
     { name: "Documents", path: "/documents", icon: "bx-file" },
     { name: "Notification", path: "/notification", icon: "bx-bell" },
     { name: "History", path: "/history", icon: "bx-history" },
   ],
-  requestor: [
+  seeker: [
     { name: "Dashboard", path: "/requestor/dashboard", icon: "bx-home-alt" },
     { name: "Seek Consent", path: "/requestor/request", icon: "bx-user-plus" },
     { name: "History", path: "/requestor/history", icon: "bx-history" },
@@ -24,7 +25,7 @@ const navLinks = {
 
 export const Navbar = ({ role, isClosed, toggleSidebar }) => {
   const [colorMode, setColorMode] = useColorMode();
-  const { logout } = useAuth();
+  const { auth, logout } = useAuth();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = React.useState(false);
 
@@ -32,14 +33,16 @@ export const Navbar = ({ role, isClosed, toggleSidebar }) => {
     setColorMode(colorMode === "light" ? "dark" : "light");
     const body = document.querySelector("body");
     const modeText = document.querySelector(".mode-text");
-    modeText.innerText = body.classList.contains("dark")
-      ? "Light Mode"
-      : "Dark Mode";
+    modeText.innerText = body.classList.contains("dark") ? "Light Mode" : "Dark Mode";
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (auth?.user) {
+      await clearPrivateKey(auth.user); // Clear private key from IndexedDB
+    }
+
     logout();
-    navigate("/login");
+    navigate("/login", { replace: true });
   };
 
   const toggleMenu = () => setIsOpen(!isOpen);
@@ -63,17 +66,12 @@ export const Navbar = ({ role, isClosed, toggleSidebar }) => {
 
   return (
     <div className="md:flex">
-      {/* Mobile Toggle Button */}
       <nav className="md:hidden fixed top-4 right-4 z-50">
-        <button
-          onClick={toggleMenu}
-          className="text-gray-700 focus:outline-none"
-        >
+        <button onClick={toggleMenu} className="text-gray-700 focus:outline-none">
           <i className={`bx ${isOpen ? "bx-x" : "bx-menu"} text-3xl`}></i>
         </button>
       </nav>
 
-      {/* Sidebar */}
       <aside
         className={`sidebar ${isClosed ? "close" : ""} bg-gray-100 text-gray-700 w-3/4 fixed top-0 md:top-0 md:left-0 md:static transform ${
           isOpen ? "translate-x-0" : "-translate-x-full"
